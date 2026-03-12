@@ -165,7 +165,7 @@ int watcher_main(int argc, char **argv)
         exit(EXIT_FAILURE);
     }
 
-    arena arena = arena_create((void *)memory, 1024 * 1024);
+    arena arena = arena_create(memory, MEMORY_SIZE);
     watch_dir(inotify_fd, argv[1], -1, &arena);
 
     for (;;)
