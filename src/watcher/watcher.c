@@ -7,41 +7,42 @@
 #include <limits.h>
 #include <string.h>
 
-#define MAX_EVENTS      1024
-#define MAX_DIRECTORIES 1024
-#define MAX_NAME_SIZE     NAME_MAX + 1
-#define MAX_EVENT_SIZE   (sizeof(struct inotify_event) + MAX_NAME_SIZE)
-#define INOTIFY_BUF_SIZE (MAX_EVENTS * MAX_EVENT_SIZE)
-#define MAX_BUF_SIZE      PATH_MAX 
-#define EVENT_FLAGS     IN_CREATE | IN_MOVED_TO 
-#define MAX_WD 8192
-#define MEMORY_SIZE 1024 * 1024
+#define ROOT_PARENT_INDEX  (-1)
+#define MAX_EVENTS         (1024)
+#define MAX_DIRS           (8192)
+#define MAX_NAME_SIZE      (NAME_MAX + 1)
+#define MAX_EVENT_SIZE     (sizeof(struct inotify_event) + MAX_NAME_SIZE)
+#define INOTIFY_BUF_SIZE   (MAX_EVENTS * MAX_EVENT_SIZE)
+#define EVENT_FLAGS        (IN_CREATE | IN_MOVED_TO)
+#define MAX_WD             (8192)
+#define INDEX_NOT_FOUND    (MAX_WD)
+#define MEMORY_SIZE        (1024 * 1024)
 
 typedef struct
 {
-    int wd;
-    int parent_index;
+    int    wd;
+    int    parent_index;
     str_slice name;
 } directory;
 
 typedef struct
 {
-    int index;
-    directory entries[MAX_DIRECTORIES];
+    int    index;
+    directory entries[MAX_DIRS];
 } watch_list;
 
 // globals
-static char memory[MEMORY_SIZE] = {};
-static int wd_to_index[MAX_WD];
-static char inotify_buffer[INOTIFY_BUF_SIZE];
+static char       memory[MEMORY_SIZE] = {};
+static int        wd_to_index[MAX_WD];
+static char       inotify_buffer[INOTIFY_BUF_SIZE];
 static watch_list watched_dirs;
 
 str_slice build_full_path(int parent_index, const char* dirname)
 {
-    static char buffer[MAX_BUF_SIZE] = {};
+    static char buffer[PATH_MAX] = {};
 
     // null terminate the buffer
-    char *p = buffer + MAX_BUF_SIZE;
+    char *p = buffer + PATH_MAX;
     *--p = '\0';
 
     size_t total_len = 0;
@@ -52,20 +53,20 @@ str_slice build_full_path(int parent_index, const char* dirname)
     memcpy(p, dirname, len);
     total_len += len;
 
-    if (parent_index != -1)
+    if (parent_index != ROOT_PARENT_INDEX)
     {
         *--p = '/';
         total_len++;
     }
 
-    while (parent_index != -1)
+    while (parent_index != ROOT_PARENT_INDEX)
     {
         directory *dir = &watched_dirs.entries[parent_index];
         p -= dir->name.length;
         memcpy(p, dir->name.data, dir->name.length);
         total_len += dir->name.length;
 
-        if (dir->parent_index != -1)
+        if (dir->parent_index != ROOT_PARENT_INDEX)
         {
             *--p = '/';
             total_len++;
@@ -83,7 +84,7 @@ str_slice build_full_path(int parent_index, const char* dirname)
 
 int register_dir(const char* dirname, int wd, int parent_index, arena* arena)
 {
-    if (watched_dirs.index >= MAX_DIRECTORIES)
+    if (watched_dirs.index >= MAX_DIRS)
     {
         fprintf(stderr, "max directories reached\n");
         exit(EXIT_FAILURE);
@@ -113,13 +114,15 @@ void watch_dir(int inotify_fd, const char* dirname, int parent_index, arena* are
     int wd = inotify_add_watch(inotify_fd, fullpath.data, EVENT_FLAGS);
     if (wd < 0)
     {
+        printf("inotify_fd: %d dirname: %s parent_index: %d result: %d\n",
+                inotify_fd, dirname, parent_index, wd);
         perror("inotify_add_watch");
         exit(EXIT_FAILURE);
     }
 
     int index = register_dir(dirname, wd, parent_index, arena);
 
-    printf("watching::%s\n", fullpath.data);
+    printf("watching :: %s\n", fullpath.data);
 
     // recurse on it
     DIR *dirp = opendir(fullpath.data);
@@ -145,7 +148,7 @@ void watch_dir(int inotify_fd, const char* dirname, int parent_index, arena* are
 
 int find_directory_index(int wd)
 {
-    if (wd >= MAX_WD) return -1;
+    if (wd >= MAX_WD) return INDEX_NOT_FOUND;
 
     return wd_to_index[wd];
 }
@@ -166,7 +169,8 @@ int watcher_main(int argc, char **argv)
     }
 
     arena arena = arena_create(memory, MEMORY_SIZE);
-    watch_dir(inotify_fd, argv[1], -1, &arena);
+    char *root_dirname = argv[1];
+    watch_dir(inotify_fd, root_dirname, ROOT_PARENT_INDEX, &arena);
 
     for (;;)
     {
@@ -180,8 +184,8 @@ int watcher_main(int argc, char **argv)
             // register new dir
             if ((event->mask & IN_ISDIR) && (event->mask & (IN_CREATE | IN_MOVED_TO)))
             {
-                int parent_index = find_directory_index(event->wd);
-                if (parent_index >= 0)
+                int parent_index = find_directory_index((size_t)event->wd);
+                if (parent_index != INDEX_NOT_FOUND)
                 {
                     watch_dir(inotify_fd, event->name, parent_index, &arena);
                 }
