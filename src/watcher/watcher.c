@@ -148,7 +148,8 @@ void watch_dir(int inotify_fd, const char* dirname, int parent_index, arena* are
 
 int find_directory_index(int wd)
 {
-    if (wd >= MAX_WD) return INDEX_NOT_FOUND;
+    if (wd >= MAX_WD)
+        return INDEX_NOT_FOUND;
 
     return wd_to_index[wd];
 }
@@ -194,7 +195,6 @@ int watcher_main(int argc, char **argv)
             i += (ssize_t)sizeof(struct inotify_event) + event->len;
         }
     }
-
 
     close(inotify_fd);
 

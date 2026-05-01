@@ -15,3 +15,4 @@ gcc                                       \
         -fno-omit-frame-pointer           \
         -g                                \
         -o  ${OUTPUT_DIR}/${BIN_NAME} ${SRC_DIR}/main.c
+
